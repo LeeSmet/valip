@@ -1,6 +1,6 @@
 [package]
 name = "valip"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Lee Smet <lee.smet@hotmail.com>"]
 description = "Parsing of ip addresses from bytes representing strings"
