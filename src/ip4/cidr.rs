@@ -1,5 +1,5 @@
 use crate::errors::Error;
-use crate::ip::IPv4;
+use crate::ip4::ip::IPv4;
 
 /// A CIDR represented by a prefix and a mask
 #[derive(Debug, PartialEq, Eq)]
@@ -119,7 +119,7 @@ impl CIDR {
 #[cfg(test)]
 mod tests {
     use crate::errors::Error;
-    use crate::ip::IPv4;
+    use crate::ip4::ip::IPv4;
 
     #[test]
     fn create_new_cidr() {

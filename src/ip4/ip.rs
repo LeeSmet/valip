@@ -1,5 +1,5 @@
-use crate::cidr::CIDR;
 use crate::errors::Error;
+use crate::ip4::cidr::CIDR;
 use core::ops::Deref;
 
 /// List of all private subnets.
