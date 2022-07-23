@@ -23,4 +23,7 @@ pub enum Error {
     MissingMask,
     /// Value of the mask field is too large, this can be at most 32.
     MaskOverflow,
+    /// A sequence of zero section is omitted twice in an ipv6 address leading to ambiguity (2 "::"
+    /// occurrences).
+    DoubleOmission,
 }
