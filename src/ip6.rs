@@ -2,16 +2,22 @@ use core::ops::Deref;
 
 use crate::errors::Error;
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Ip {
     octets: [u8; 16],
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct CIDR {
     ip: Ip,
     mask: u8,
 }
 
 impl Ip {
+    pub const fn new(octets: [u8; 16]) -> Ip {
+        Ip { octets }
+    }
+
     pub fn parse(input: &[u8]) -> Result<Ip, Error> {
         if input.len() < 3 {
             return Err(Error::InputTooShort);
@@ -26,16 +32,32 @@ impl Ip {
         let mut section_count = 0;
         let mut double_section_index = None;
         let mut octets = [0; 16];
+        // Remember if the previous section was empty or not. This is unfortunately needed for
+        // addresses with leading or ending ::.
+        let mut last_seen_empty = false;
         // Decode all sections. Since we don't know the exact amount of section, append them one
         // after another, even if a :: is encountered. The position of the :: is recorded so we can
         // adjust this later if needed.
         // TODO: special case if address ends or starts with ::
         // TODO: dual format ip address
         for section in sections {
+            // Special handling to catch leading single :
+            if section_count == 1 && double_section_index.is_some() && !section.is_empty() {
+                return Err(Error::MissingOctet);
+            }
             match section.len() {
-                0 if !double_section_index.is_none() => double_section_index = Some(section_count),
-                // duplicate "::" sequence, only 1 is allowed
-                0 if double_section_index.is_some() => return Err(Error::DoubleOmission),
+                0 => {
+                    if double_section_index.is_none() {
+                        double_section_index = Some(section_count);
+                    } else if double_section_index.is_some() && section_count != 1 {
+                        // Double ::, this is not accpeted
+                        return Err(Error::DoubleOmission);
+                    }
+                    // The other case indicates a leading ::, this is fine
+                }
+                // 0 if double_section_index.is_none() => double_section_index = Some(section_count),
+                // // duplicate "::" sequence, only 1 is allowed
+                // 0 if double_section_index.is_some() => return Err(Error::DoubleOmission),
                 1 => {
                     octets[section_count * 2 + 1] = hex_byte_to_byte_value(section[0])?;
                 }
@@ -60,6 +82,12 @@ impl Ip {
             if section_count > 7 {
                 return Err(Error::TooManyOctets);
             }
+            last_seen_empty = section.is_empty();
+        }
+
+        // trailing single : character
+        if last_seen_empty {
+            return Err(Error::MissingOctet);
         }
 
         // Adjust based on ::
@@ -67,12 +95,21 @@ impl Ip {
             // Calculate how many sections have been omitted, this will be at least 1
             let omitted_sections = 8 - section_count;
             // Calculate from which point on sections need to be moved;
-            //
-
-            for idx in (section_count * 2)..((section_count - dsi) * 2) {}
+            let start = (dsi + 1 + omitted_sections) * 2;
+            // TODO: const
+            let end = 16;
+            // Move sections, iterate backward so we don't overwrite any data we later still need
+            // to move if the omitted part is short.
+            for idx in (start..end).rev() {
+                octets[idx] = octets[idx - omitted_sections * 2];
+            }
+            // Zero out omitted sections
+            for idx in (dsi * 2)..((dsi + omitted_sections) * 2) {
+                octets[idx] = 0;
+            }
         }
 
-        todo!();
+        Ok(Ip { octets })
     }
 }
 
@@ -100,11 +137,11 @@ impl Deref for CIDR {
 
 #[cfg(test)]
 mod tests {
-    use super::hex_byte_to_byte_value;
+    use super::{hex_byte_to_byte_value, Ip};
     use crate::errors::Error;
 
     #[test]
-    fn hex_convert_works() {
+    fn hex_convert() {
         assert_eq!(hex_byte_to_byte_value(b'a'), Ok(11));
         assert_eq!(hex_byte_to_byte_value(b'f'), Ok(16));
         assert_eq!(hex_byte_to_byte_value(b'A'), Ok(11));
@@ -113,5 +150,29 @@ mod tests {
         assert_eq!(hex_byte_to_byte_value(b'9'), Ok(9));
         assert_eq!(hex_byte_to_byte_value(b'g'), Err(Error::IllegalCharacter));
         assert_eq!(hex_byte_to_byte_value(b'G'), Err(Error::IllegalCharacter));
+    }
+
+    #[test]
+    fn parse_ip6() {
+        assert_eq!(
+            Ip::parse("2010::1".as_bytes()),
+            Ok(Ip::new([32, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]))
+        );
+        assert_eq!(
+            Ip::parse("::1".as_bytes()),
+            Ok(Ip::new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]))
+        );
+        assert_eq!(
+            Ip::parse("::1001:1".as_bytes()),
+            Ok(Ip::new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 1, 0, 1]))
+        );
+        assert_eq!(
+            Ip::parse("2c01::".as_bytes()),
+            Ok(Ip::new([44, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
+        );
+        assert_eq!(
+            Ip::parse("2c01:af::".as_bytes()),
+            Ok(Ip::new([44, 1, 0, 175, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
+        );
     }
 }
