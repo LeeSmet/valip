@@ -29,8 +29,8 @@ impl Ip {
             return Err(Error::InputTooLong);
         }
 
-        let sections = input.split(|c| *c == b':');
-        // 0 based count of sections, essentially the amount of : characters encountered.
+        let sections = input.split(|&c| c == b':');
+        // 0 based count of sections.
         let mut section_count = 0;
         let mut double_section_index = None;
         let mut octets = [0; IP_BYTES];
@@ -40,26 +40,29 @@ impl Ip {
         // Decode all sections. Since we don't know the exact amount of section, append them one
         // after another, even if a :: is encountered. The position of the :: is recorded so we can
         // adjust this later if needed.
-        // TODO: special case if address ends with ::
         // TODO: dual format ip address
         for section in sections {
             // Special handling to catch leading single :
-            if section_count == 1 && double_section_index.is_some() && !section.is_empty() {
+            if section_count == 0 && double_section_index.is_some() && !section.is_empty() {
                 return Err(Error::MissingOctet);
             }
             match section.len() {
-                0 => {
-                    match double_section_index {
-                        None => double_section_index = Some(section_count),
-                        Some(dsi) if last_seen_empty => {
-                            // 2 is valid for a trailing ::.
-                            if section_count != dsi + 1 {
-                                return Err(Error::DoubleOmission);
-                            }
-                        }
-                        _ => return Err(Error::DoubleOmission),
-                    }
+                0 if section_count == 0 && !last_seen_empty => {
+                    // Don't do anything, this ignores the additional section from a leading :, but
+                    // mark that we did see an empty section so we don't keep swallowing :
+                    // characters.
+                    last_seen_empty = true;
+                    continue;
                 }
+                0 if section_count > 0 || last_seen_empty => match double_section_index {
+                    None => double_section_index = Some(section_count),
+                    Some(dsi) if last_seen_empty => {
+                        if section_count != dsi + 1 {
+                            return Err(Error::DoubleOmission);
+                        }
+                    }
+                    _ => return Err(Error::DoubleOmission),
+                },
                 1 => {
                     octets[section_count * 2 + 1] = hex_byte_to_byte_value(section[0])?;
                 }
@@ -81,8 +84,15 @@ impl Ip {
                 _ => return Err(Error::OctetOverflow),
             }
             section_count += 1;
-            if section_count > 7 {
-                return Err(Error::TooManyOctets);
+            if section_count > 8 {
+                if let Some(dsi) = double_section_index {
+                    // The following is only possible for a trailing ::
+                    if !(dsi == section_count - 2 && section.is_empty()) {
+                        return Err(Error::TooManyOctets);
+                    }
+                } else {
+                    return Err(Error::TooManyOctets);
+                }
             }
             last_seen_empty = section.is_empty();
         }
@@ -96,20 +106,33 @@ impl Ip {
                 // +2.
                 if dsi + 2 != section_count {
                     return Err(Error::MissingOctet);
+                } else {
+                    // Decrement the section count so we have an unambiguous value for the shifting
+                    // section.
+                    section_count -= 1;
                 }
             }
+        }
+
+        // Ensure we have sufficient input
+        if section_count < 8 && !double_section_index.is_some() {
+            return Err(Error::MissingOctet);
         }
 
         // Adjust based on ::
         if let Some(dsi) = double_section_index {
             // Calculate how many sections have been omitted, this will be at least 1
-            let omitted_sections = 8 - section_count;
+            // Notice that we subtract section count from 9: there are 8 sections, but we also
+            // count 1 section for the omitted sections;
+            let omitted_sections = 9 - section_count;
             // Calculate from which point on sections need to be moved;
-            let start = (dsi + 1 + omitted_sections) * 2;
+            let start = (dsi + omitted_sections) * 2;
             // Move sections, iterate backward so we don't overwrite any data we later still need
             // to move if the omitted part is short.
+            // In this loop we need to account for the fact that we wrote 2 0 bytes for the omitted
+            // section, irrespectively of how long it it.
             for idx in (start..IP_BYTES).rev() {
-                octets[idx] = octets[idx - omitted_sections * 2];
+                octets[idx] = octets[idx - (omitted_sections - 1) * 2];
             }
             // Zero out omitted sections
             for idx in (dsi * 2)..((dsi + omitted_sections) * 2) {
@@ -182,6 +205,32 @@ mod tests {
         assert_eq!(
             Ip::parse("2c01:af::".as_bytes()),
             Ok(Ip::new([44, 1, 0, 175, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
+        );
+        assert_eq!(
+            Ip::parse("f0a:f0b::f0c:f0d:f0e".as_bytes()),
+            Ok(Ip::new([
+                15, 10, 15, 11, 0, 0, 0, 0, 0, 0, 15, 12, 15, 13, 15, 14
+            ]))
+        );
+        assert_eq!(
+            Ip::parse("1:2::3:4:5:6:7".as_bytes()),
+            Ok(Ip::new([0, 1, 0, 2, 0, 0, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7]))
+        );
+        assert_eq!(
+            Ip::parse("::1:2:3:4:5:6:7".as_bytes()),
+            Ok(Ip::new([0, 0, 0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7]))
+        );
+        assert_eq!(
+            Ip::parse("ab:cd:ef:01:02::".as_bytes()),
+            Ok(Ip::new([
+                0, 171, 0, 205, 0, 239, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0
+            ]))
+        );
+        assert_eq!(
+            Ip::parse("ab:cd:ef:01:02:03:04::".as_bytes()),
+            Ok(Ip::new([
+                0, 171, 0, 205, 0, 239, 0, 1, 0, 2, 0, 3, 0, 4, 0, 0
+            ]))
         );
     }
 }
