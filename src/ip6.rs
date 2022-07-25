@@ -2,9 +2,11 @@ use core::ops::Deref;
 
 use crate::errors::Error;
 
+const IP_BYTES: usize = 16;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ip {
-    octets: [u8; 16],
+    octets: [u8; IP_BYTES],
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -14,7 +16,7 @@ pub struct CIDR {
 }
 
 impl Ip {
-    pub const fn new(octets: [u8; 16]) -> Ip {
+    pub const fn new(octets: [u8; IP_BYTES]) -> Ip {
         Ip { octets }
     }
 
@@ -31,14 +33,14 @@ impl Ip {
         // 0 based count of sections, essentially the amount of : characters encountered.
         let mut section_count = 0;
         let mut double_section_index = None;
-        let mut octets = [0; 16];
+        let mut octets = [0; IP_BYTES];
         // Remember if the previous section was empty or not. This is unfortunately needed for
         // addresses with leading or ending ::.
         let mut last_seen_empty = false;
         // Decode all sections. Since we don't know the exact amount of section, append them one
         // after another, even if a :: is encountered. The position of the :: is recorded so we can
         // adjust this later if needed.
-        // TODO: special case if address ends or starts with ::
+        // TODO: special case if address ends with ::
         // TODO: dual format ip address
         for section in sections {
             // Special handling to catch leading single :
@@ -47,17 +49,17 @@ impl Ip {
             }
             match section.len() {
                 0 => {
-                    if double_section_index.is_none() {
-                        double_section_index = Some(section_count);
-                    } else if double_section_index.is_some() && section_count != 1 {
-                        // Double ::, this is not accpeted
-                        return Err(Error::DoubleOmission);
+                    match double_section_index {
+                        None => double_section_index = Some(section_count),
+                        Some(dsi) if last_seen_empty => {
+                            // 2 is valid for a trailing ::.
+                            if section_count != dsi + 1 {
+                                return Err(Error::DoubleOmission);
+                            }
+                        }
+                        _ => return Err(Error::DoubleOmission),
                     }
-                    // The other case indicates a leading ::, this is fine
                 }
-                // 0 if double_section_index.is_none() => double_section_index = Some(section_count),
-                // // duplicate "::" sequence, only 1 is allowed
-                // 0 if double_section_index.is_some() => return Err(Error::DoubleOmission),
                 1 => {
                     octets[section_count * 2 + 1] = hex_byte_to_byte_value(section[0])?;
                 }
@@ -85,9 +87,17 @@ impl Ip {
             last_seen_empty = section.is_empty();
         }
 
-        // trailing single : character
+        // Check for trailing single : character
         if last_seen_empty {
-            return Err(Error::MissingOctet);
+            if let Some(dsi) = double_section_index {
+                // add 2 to the index of the double section for the check (which verifies if the
+                // last characters is a ::. Dsi points to the first :, then there is the implied
+                // omitted section beween the ::, followed by the omitted final section, therefore,
+                // +2.
+                if dsi + 2 != section_count {
+                    return Err(Error::MissingOctet);
+                }
+            }
         }
 
         // Adjust based on ::
@@ -96,11 +106,9 @@ impl Ip {
             let omitted_sections = 8 - section_count;
             // Calculate from which point on sections need to be moved;
             let start = (dsi + 1 + omitted_sections) * 2;
-            // TODO: const
-            let end = 16;
             // Move sections, iterate backward so we don't overwrite any data we later still need
             // to move if the omitted part is short.
-            for idx in (start..end).rev() {
+            for idx in (start..IP_BYTES).rev() {
                 octets[idx] = octets[idx - omitted_sections * 2];
             }
             // Zero out omitted sections
@@ -121,8 +129,8 @@ impl Ip {
 fn hex_byte_to_byte_value(input: u8) -> Result<u8, Error> {
     match input {
         b'0'..=b'9' => Ok(input - b'0'),
-        b'a'..=b'f' => Ok(input - 86),
-        b'A'..=b'F' => Ok(input - 54),
+        b'a'..=b'f' => Ok(input - 87),
+        b'A'..=b'F' => Ok(input - 55),
         _ => Err(Error::IllegalCharacter),
     }
 }
@@ -142,12 +150,13 @@ mod tests {
 
     #[test]
     fn hex_convert() {
-        assert_eq!(hex_byte_to_byte_value(b'a'), Ok(11));
-        assert_eq!(hex_byte_to_byte_value(b'f'), Ok(16));
-        assert_eq!(hex_byte_to_byte_value(b'A'), Ok(11));
-        assert_eq!(hex_byte_to_byte_value(b'F'), Ok(16));
+        assert_eq!(hex_byte_to_byte_value(b'a'), Ok(10));
+        assert_eq!(hex_byte_to_byte_value(b'f'), Ok(15));
+        assert_eq!(hex_byte_to_byte_value(b'A'), Ok(10));
+        assert_eq!(hex_byte_to_byte_value(b'F'), Ok(15));
         assert_eq!(hex_byte_to_byte_value(b'0'), Ok(0));
         assert_eq!(hex_byte_to_byte_value(b'9'), Ok(9));
+        assert_eq!(hex_byte_to_byte_value(b'c'), Ok(12));
         assert_eq!(hex_byte_to_byte_value(b'g'), Err(Error::IllegalCharacter));
         assert_eq!(hex_byte_to_byte_value(b'G'), Err(Error::IllegalCharacter));
     }
