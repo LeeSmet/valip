@@ -21,7 +21,8 @@ impl Ip {
     }
 
     pub fn parse(input: &[u8]) -> Result<Ip, Error> {
-        if input.len() < 3 {
+        // :: is the shortest possible IPv6
+        if input.len() < 2 {
             return Err(Error::InputTooShort);
         }
 
@@ -42,8 +43,13 @@ impl Ip {
         // adjust this later if needed.
         // TODO: dual format ip address
         for section in sections {
+            // Required for trailing :: characters which only omit the last section
+            if section_count == 8 && !section.is_empty() {
+                return Err(Error::TooManyOctets);
+            }
+
             // Special handling to catch leading single :
-            if section_count == 0 && double_section_index.is_some() && !section.is_empty() {
+            if section_count == 0 && last_seen_empty && !section.is_empty() {
                 return Err(Error::MissingOctet);
             }
             match section.len() {
@@ -102,7 +108,7 @@ impl Ip {
             if let Some(dsi) = double_section_index {
                 // add 2 to the index of the double section for the check (which verifies if the
                 // last characters is a ::. Dsi points to the first :, then there is the implied
-                // omitted section beween the ::, followed by the omitted final section, therefore,
+                // omitted section between the ::, followed by the omitted final section, therefore,
                 // +2.
                 if dsi + 2 != section_count {
                     return Err(Error::MissingOctet);
@@ -217,6 +223,10 @@ mod tests {
             Ok(Ip::new([0, 1, 0, 2, 0, 0, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7]))
         );
         assert_eq!(
+            Ip::parse("1:2:3:4:5:6:7:8".as_bytes()),
+            Ok(Ip::new([0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7, 0, 8]))
+        );
+        assert_eq!(
             Ip::parse("::1:2:3:4:5:6:7".as_bytes()),
             Ok(Ip::new([0, 0, 0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 7]))
         );
@@ -231,6 +241,30 @@ mod tests {
             Ok(Ip::new([
                 0, 171, 0, 205, 0, 239, 0, 1, 0, 2, 0, 3, 0, 4, 0, 0
             ]))
+        );
+    }
+
+    #[test]
+    fn reject_invalid_ip6() {
+        assert_eq!(
+            Ip::parse("ab:cd:ef:01:02:03:04::1".as_bytes()),
+            Err(Error::TooManyOctets),
+        );
+        assert_eq!(
+            Ip::parse(":ab:cd:ef:01:23:45:67".as_bytes()),
+            Err(Error::MissingOctet),
+        );
+        assert_eq!(
+            Ip::parse(":ab:cd:ef:01:23:45:67:89".as_bytes()),
+            Err(Error::MissingOctet),
+        );
+        assert_eq!(
+            Ip::parse("ab:cd:ef:01:23:45:67:89:".as_bytes()),
+            Err(Error::TooManyOctets),
+        );
+        assert_eq!(
+            Ip::parse("ab:cd:ef:01:23:45:67:".as_bytes()),
+            Err(Error::MissingOctet),
         );
     }
 }
