@@ -4,22 +4,80 @@ use crate::errors::Error;
 
 const IP_BYTES: usize = 16;
 
-#[derive(Debug, PartialEq, Eq)]
+/// List of all private subnets.
+///
+/// An IP is considered public if it is not part of a private range. Private ranges are considered
+/// to be:
+///
+/// - 100::/64: Discard prefix
+/// - fc00::/7: Private network
+/// - fe80::/10: Link local address
+const PRIVATE_IP6_SUBNETS: [CIDR; 3] = [
+    CIDR::new([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 64),
+    CIDR::new([252, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 7),
+    CIDR::new([254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 10),
+];
+
+/// A plain IPv6 address without network mask.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct Ip {
     octets: [u8; IP_BYTES],
 }
 
-#[derive(Debug, PartialEq, Eq)]
+/// A CIDR represented by a prefix and a mask
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CIDR {
     ip: Ip,
     mask: u8,
 }
 
 impl Ip {
+    /// Create a new IPv6 address with the given octets.
+    #[inline]
     pub const fn new(octets: [u8; IP_BYTES]) -> Ip {
         Ip { octets }
     }
 
+    /// Extracts the octets from the IP as a byte array.
+    #[inline]
+    pub const fn as_octets(&self) -> [u8; IP_BYTES] {
+        self.octets
+    }
+
+    /// Interpret the IP address as the bit sequence
+    #[inline]
+    pub const fn as_bits(&self) -> u128 {
+        (self.octets[0] as u128) << 120
+            | (self.octets[1] as u128) << 112
+            | (self.octets[2] as u128) << 104
+            | (self.octets[3] as u128) << 96
+            | (self.octets[4] as u128) << 88
+            | (self.octets[5] as u128) << 80
+            | (self.octets[6] as u128) << 72
+            | (self.octets[7] as u128) << 64
+            | (self.octets[8] as u128) << 56
+            | (self.octets[9] as u128) << 48
+            | (self.octets[10] as u128) << 40
+            | (self.octets[11] as u128) << 32
+            | (self.octets[12] as u128) << 24
+            | (self.octets[13] as u128) << 16
+            | (self.octets[14] as u128) << 8
+            | (self.octets[15] as u128)
+    }
+
+    /// Checks if an IP is in the public ranges or not.
+    pub fn is_public(&self) -> bool {
+        for pip in &PRIVATE_IP6_SUBNETS {
+            // Ensure only part of the prefix is set
+            if self.as_bits() & pip.as_bitmask() == pip.as_ip().as_bits() {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Parses ACII input bytes to an IPv6 address.
     pub fn parse(input: &[u8]) -> Result<Ip, Error> {
         // :: is the shortest possible IPv6
         if input.len() < 2 {
@@ -147,6 +205,112 @@ impl Ip {
         }
 
         Ok(Ip { octets })
+    }
+}
+
+impl CIDR {
+    /// Create a new CIDR from octets and a mask.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if mask is higher than 128.
+    #[inline]
+    pub const fn new(octets: [u8; IP_BYTES], mask: u8) -> CIDR {
+        if mask > 128 {
+            panic!("CIDR mask can't be higher than 128");
+        }
+
+        CIDR {
+            ip: Ip::new(octets),
+            mask,
+        }
+    }
+
+    /// Extracts the ip from the CIDR.
+    #[inline]
+    pub const fn as_ip(&self) -> Ip {
+        self.ip
+    }
+
+    /// Extracts the mask from the CIDR as a byte.
+    #[inline]
+    pub const fn as_mask(&self) -> u8 {
+        self.mask
+    }
+
+    /// Checks if an IP is unicast or not.
+    #[inline]
+    pub const fn is_unicast(&self) -> bool {
+        // Multicast has high order byte set to all 1 bits.
+        self.ip.octets[0] != u8::MAX
+    }
+
+    /// Get the mask value as bitmask with the fixed bits set (111...000).
+    #[inline]
+    pub const fn as_bitmask(&self) -> u128 {
+        // Special condition to avoid an overvlow
+        if self.mask == 0 {
+            u128::MAX
+        } else {
+            !(2_u128.pow(128 - self.mask as u32) - 1)
+        }
+    }
+
+    /// Checks if an IP is in the public ranges or not.
+    #[inline]
+    pub fn is_public(&self) -> bool {
+        self.ip.is_public()
+    }
+
+    /// Parses ASCII input bytes to an IPv6 in CIDR notation.
+    pub fn parse(input: &[u8]) -> Result<CIDR, Error> {
+        // Input can be at most 43 bytes.
+        if input.len() > 43 {
+            return Err(Error::InputTooLong);
+        }
+
+        let sep_pos = if let Some(pos) = input.iter().position(|c| c == &b'/') {
+            pos
+        } else {
+            return Err(Error::MissingMask);
+        };
+
+        let ip = Ip::parse(&input[..sep_pos])?;
+
+        let mask_input = &input[sep_pos + 1..];
+        if mask_input.len() > 3 {
+            return Err(Error::InputTooLong);
+        }
+        if mask_input.is_empty() {
+            return Err(Error::InputTooShort);
+        }
+
+        let mut mask: u8 = 0;
+        for c in mask_input {
+            match c {
+                b'0'..=b'9' => {
+                    mask = match mask.checked_mul(10) {
+                        Some(mask) => mask,
+                        None => return Err(Error::MaskOverflow),
+                    };
+                    mask = match mask.checked_add(c - b'0') {
+                        Some(mask) => mask,
+                        None => return Err(Error::MaskOverflow),
+                    };
+                }
+                _ => return Err(Error::IllegalCharacter),
+            }
+        }
+
+        // 128 bits max in an IPv6, also if mask is 0 it must be single digit.
+        if mask > 32 {
+            return Err(Error::MaskOverflow);
+        }
+        if mask == 0 && mask_input.len() > 1 {
+            return Err(Error::LeadingZero);
+        }
+
+        Ok(CIDR { ip, mask })
     }
 }
 

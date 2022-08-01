@@ -53,7 +53,7 @@ impl IPv4 {
         self.octets
     }
 
-    /// Helper to convert a 4 byte array to 32 ipv4 bits
+    /// Interpret the IP address as the bit sequence
     #[inline]
     pub const fn as_bits(&self) -> u32 {
         (self.octets[0] as u32) << 24
