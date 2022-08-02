@@ -303,7 +303,7 @@ impl CIDR {
         }
 
         // 128 bits max in an IPv6, also if mask is 0 it must be single digit.
-        if mask > 32 {
+        if mask > 128 {
             return Err(Error::MaskOverflow);
         }
         if mask == 0 && mask_input.len() > 1 {
@@ -338,7 +338,7 @@ impl Deref for CIDR {
 
 #[cfg(test)]
 mod tests {
-    use super::{hex_byte_to_byte_value, Ip};
+    use super::{hex_byte_to_byte_value, Ip, CIDR};
     use crate::errors::Error;
 
     #[test]
@@ -429,6 +429,17 @@ mod tests {
         assert_eq!(
             Ip::parse("ab:cd:ef:01:23:45:67:".as_bytes()),
             Err(Error::MissingOctet),
+        );
+    }
+
+    #[test]
+    fn parse_cidr() {
+        assert_eq!(
+            CIDR::parse("2a10:b600:1::0cc4:7a30:65b5/64".as_bytes()),
+            Ok(CIDR::new(
+                [42, 16, 182, 0, 0, 1, 0, 0, 0, 0, 12, 196, 122, 48, 101, 181],
+                64
+            ))
         );
     }
 }
