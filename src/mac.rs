@@ -47,3 +47,33 @@ impl Mac {
         Ok(Mac { raw })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Mac;
+    use crate::errors::Error;
+
+    #[test]
+    fn parse_mac() {
+        assert_eq!(
+            Mac::parse("00:00:ec:00:5e:20".as_bytes()),
+            Ok(Mac::new([0, 0, 236, 0, 94, 32]))
+        );
+        assert_eq!(
+            Mac::parse("00:00:ec:00:5e".as_bytes()),
+            Err(Error::InputTooShort),
+        );
+        assert_eq!(
+            Mac::parse("00:00:ec:00:5e:20:32".as_bytes()),
+            Err(Error::InputTooLong),
+        );
+        assert_eq!(
+            Mac::parse("00:00:ece:00:5:20".as_bytes()),
+            Err(Error::IllegalCharacter),
+        );
+        assert_eq!(
+            Mac::parse("00:00:ec:0g:5e:20".as_bytes()),
+            Err(Error::IllegalCharacter),
+        );
+    }
+}
