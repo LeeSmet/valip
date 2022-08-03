@@ -28,6 +28,9 @@ impl Mac {
         let mut raw = [0; MAC_BYTE_SIZE];
 
         for byte in input.split(|&c| c == b':') {
+            if bytes >= MAC_BYTE_SIZE {
+                return Err(Error::TooManyOctets);
+            }
             if byte.len() != 2 {
                 // TODO
                 return Err(Error::IllegalCharacter);
@@ -35,9 +38,6 @@ impl Mac {
 
             raw[bytes] = hex_byte_to_byte_value(byte[0])? << 4 | hex_byte_to_byte_value(byte[1])?;
             bytes += 1;
-            if bytes >= MAC_BYTE_SIZE {
-                return Err(Error::TooManyOctets);
-            }
         }
 
         if bytes != MAC_BYTE_SIZE {
