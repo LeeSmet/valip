@@ -35,7 +35,7 @@ impl Mac {
 
             raw[bytes] = hex_byte_to_byte_value(byte[0])? << 4 | hex_byte_to_byte_value(byte[1])?;
             bytes += 1;
-            if bytes >= MAC_BYTE_SIZE {
+            if bytes > MAC_BYTE_SIZE {
                 return Err(Error::TooManyOctets);
             }
         }
