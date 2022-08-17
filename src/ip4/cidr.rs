@@ -3,6 +3,10 @@ use crate::ip4::ip::IPv4;
 
 /// A CIDR represented by a prefix and a mask
 #[derive(Debug, PartialEq, Eq)]
+#[deprecated(
+    since = "0.3",
+    note = "valip::ip4::cidr::CIDR is deprecated and will be removed in version 0.4, use valip::ip4::CIDR instead"
+)]
 pub struct CIDR {
     prefix: [u8; 4],
     mask: u8,

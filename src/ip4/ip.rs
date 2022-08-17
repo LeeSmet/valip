@@ -36,6 +36,10 @@ const PRIVATE_IP4_SUBNETS: [CIDR; 12] = [
 
 /// A plain IPv4 address without network mask.
 #[derive(Debug, PartialEq, Eq)]
+#[deprecated(
+    since = "0.3",
+    note = "valip::ip4::ip::IPv4 is deprecated and will be removed in version 0.4, use valip::ip4::Ip instead"
+)]
 pub struct IPv4 {
     octets: [u8; 4],
 }
