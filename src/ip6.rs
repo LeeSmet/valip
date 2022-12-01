@@ -45,6 +45,13 @@ impl Ip {
         self.octets
     }
 
+    /// Checks if an IP is unicast or not.
+    #[inline]
+    pub const fn is_unicast(&self) -> bool {
+        // Multicast has high order byte set to all 1 bits.
+        self.octets[0] != u8::MAX
+    }
+
     /// Interpret the IP address as the bit sequence
     #[inline]
     pub const fn as_bits(&self) -> u128 {
