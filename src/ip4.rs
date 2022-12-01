@@ -1,6 +1,3 @@
-pub mod cidr;
-pub mod ip;
-
 use crate::errors::Error;
 use core::ops::Deref;
 
