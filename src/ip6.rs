@@ -250,7 +250,7 @@ impl CIDR {
     #[inline]
     pub const fn is_unicast(&self) -> bool {
         // Multicast has high order byte set to all 1 bits.
-        self.ip.octets[0] != u8::MAX
+        self.ip.is_unicast()
     }
 
     /// Get the mask value as bitmask with the fixed bits set (111...000).
