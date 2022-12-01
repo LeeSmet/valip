@@ -22,30 +22,30 @@ use core::ops::Deref;
 /// - 203.0.113.0/24 - TEST-NET-3, documentation and examples
 /// - 255.255.255.255/32 - Limited broadcast range
 const PRIVATE_IP4_SUBNETS: [CIDR; 12] = [
-    CIDR::new([0, 0, 0, 0], 8),
-    CIDR::new([10, 0, 0, 0], 8),
-    CIDR::new([100, 64, 0, 0], 10),
-    CIDR::new([127, 0, 0, 0], 8),
-    CIDR::new([169, 254, 0, 0], 16),
-    CIDR::new([172, 16, 0, 0], 12),
-    CIDR::new([192, 0, 2, 0], 24),
-    CIDR::new([192, 168, 0, 0], 16),
-    CIDR::new([198, 18, 0, 0], 15),
-    CIDR::new([198, 51, 100, 0], 24),
-    CIDR::new([203, 0, 113, 0], 24),
-    CIDR::new([255, 255, 255, 255], 32),
+    CIDR::new(Ip::new([0, 0, 0, 0]), 8),
+    CIDR::new(Ip::new([10, 0, 0, 0]), 8),
+    CIDR::new(Ip::new([100, 64, 0, 0]), 10),
+    CIDR::new(Ip::new([127, 0, 0, 0]), 8),
+    CIDR::new(Ip::new([169, 254, 0, 0]), 16),
+    CIDR::new(Ip::new([172, 16, 0, 0]), 12),
+    CIDR::new(Ip::new([192, 0, 2, 0]), 24),
+    CIDR::new(Ip::new([192, 168, 0, 0]), 16),
+    CIDR::new(Ip::new([198, 18, 0, 0]), 15),
+    CIDR::new(Ip::new([198, 51, 100, 0]), 24),
+    CIDR::new(Ip::new([203, 0, 113, 0]), 24),
+    CIDR::new(Ip::new([255, 255, 255, 255]), 32),
 ];
 
 /// A plain IPv4 address without network mask.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct Ip {
     octets: [u8; 4],
 }
 
 /// A CIDR represented by a prefix and a mask
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CIDR {
-    prefix: [u8; 4],
+    ip: Ip,
     mask: u8,
 }
 
@@ -87,7 +87,7 @@ impl Ip {
     pub fn is_public(&self) -> bool {
         for pip in &PRIVATE_IP4_SUBNETS {
             // Ensure only part of the prefix is set
-            if self.as_bits() & pip.as_bitmask() == Ip::new(pip.as_prefix()).as_bits() {
+            if self.as_bits() & pip.as_bitmask() == pip.as_prefix().as_bits() {
                 return false;
             }
         }
@@ -190,18 +190,18 @@ impl CIDR {
     ///
     /// This function panics if mask is higher than 32.
     #[inline]
-    pub const fn new(prefix: [u8; 4], mask: u8) -> CIDR {
+    pub const fn new(ip: Ip, mask: u8) -> CIDR {
         if mask > 32 {
             panic!("CIDR mask can't be higher than 32");
         }
 
-        CIDR { prefix, mask }
+        CIDR { ip, mask }
     }
 
     /// Extracts the prefix from the CIDR as a byte array.
     #[inline]
-    pub const fn as_prefix(&self) -> [u8; 4] {
-        self.prefix
+    pub const fn as_prefix(&self) -> Ip {
+        self.ip
     }
 
     /// Extracts the mask from the CIDR as a byte.
@@ -216,10 +216,7 @@ impl CIDR {
     /// no functional difference from the client perspective.
     #[inline]
     pub const fn is_unicast(&self) -> bool {
-        // 224.0.0.0/4 -> multicast range.
-        // 240.0.0.0/4 -> reserved for future use.
-        // Hence we consider all the remaining to be unicast.
-        self.prefix[0] < 224
+        self.ip.is_unicast()
     }
 
     /// Get the mask value as bitmask with the fixed bits set (111...000).
@@ -233,7 +230,7 @@ impl CIDR {
     /// Checks if an IP is in the public ranges or not.
     #[inline]
     pub fn is_public(&self) -> bool {
-        Ip::new(self.prefix).is_public()
+        self.ip.is_public()
     }
 
     /// Parses ASCII input bytes to an IPv4 in CIDR notation.
@@ -249,7 +246,7 @@ impl CIDR {
             return Err(Error::MissingMask);
         };
 
-        let prefix = Ip::parse(&input[..sep_pos])?.as_octets();
+        let ip = Ip::parse(&input[..sep_pos])?;
 
         let mask_input = &input[sep_pos + 1..];
         if mask_input.len() > 2 {
@@ -279,7 +276,7 @@ impl CIDR {
             return Err(Error::LeadingZero);
         }
 
-        Ok(CIDR { prefix, mask })
+        Ok(CIDR { ip, mask })
     }
 
     /// Checks if an [`Ip`] is contained in this subnet.
@@ -287,7 +284,7 @@ impl CIDR {
     pub const fn contains(&self, ip: Ip) -> bool {
         let mask_bits = self.as_bitmask();
 
-        ip.as_bits() & mask_bits == Ip::new(self.prefix).as_bits() & mask_bits
+        ip.as_bits() & mask_bits == self.ip.as_bits() & mask_bits
     }
 }
 
@@ -414,44 +411,44 @@ mod tests {
 
     #[test]
     fn create_new_cidr() {
-        super::CIDR::new([1, 1, 1, 1], 15);
+        super::CIDR::new(super::Ip::new([1, 1, 1, 1]), 15);
     }
 
     #[test]
     #[should_panic]
     fn reject_large_mask() {
-        super::CIDR::new([1, 1, 1, 1], 33);
+        super::CIDR::new(super::Ip::new([1, 1, 1, 1]), 33);
     }
 
     #[test]
     fn accept_valid_cidr() {
         assert_eq!(
             super::CIDR::parse("1.1.1.1/32".as_bytes()),
-            Ok(super::CIDR::new([1, 1, 1, 1], 32))
+            Ok(super::CIDR::new(super::Ip::new([1, 1, 1, 1]), 32))
         );
         assert_eq!(
             super::CIDR::parse("1.1.1.1/1".as_bytes()),
-            Ok(super::CIDR::new([1, 1, 1, 1], 1))
+            Ok(super::CIDR::new(super::Ip::new([1, 1, 1, 1]), 1))
         );
         assert_eq!(
             super::CIDR::parse("255.255.255.255/32".as_bytes()),
-            Ok(super::CIDR::new([255, 255, 255, 255], 32))
+            Ok(super::CIDR::new(super::Ip::new([255, 255, 255, 255]), 32))
         );
         assert_eq!(
             super::CIDR::parse("255.255.255.129/25".as_bytes()),
-            Ok(super::CIDR::new([255, 255, 255, 129], 25))
+            Ok(super::CIDR::new(super::Ip::new([255, 255, 255, 129]), 25))
         );
         assert_eq!(
             super::CIDR::parse("128.0.0.0/1".as_bytes()),
-            Ok(super::CIDR::new([128, 0, 0, 0,], 1))
+            Ok(super::CIDR::new(super::Ip::new([128, 0, 0, 0,]), 1))
         );
         assert_eq!(
             super::CIDR::parse("32.40.50.24/29".as_bytes()),
-            Ok(super::CIDR::new([32, 40, 50, 24], 29))
+            Ok(super::CIDR::new(super::Ip::new([32, 40, 50, 24]), 29))
         );
         assert_eq!(
             super::CIDR::parse("10.0.0.1/8".as_bytes()),
-            Ok(super::CIDR::new([10, 0, 0, 1], 8))
+            Ok(super::CIDR::new(super::Ip::new([10, 0, 0, 1]), 8))
         );
     }
 
