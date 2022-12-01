@@ -313,6 +313,14 @@ impl CIDR {
 
         Ok(CIDR { ip, mask })
     }
+
+    /// Checks if an [`Ip`] is contained in this subnet.
+    #[inline]
+    pub const fn contains(&self, ip: Ip) -> bool {
+        let mask_bits = self.as_bitmask();
+
+        ip.as_bits() & mask_bits == self.ip.as_bits() & mask_bits
+    }
 }
 
 impl Deref for CIDR {

@@ -282,7 +282,7 @@ impl CIDR {
         Ok(CIDR { prefix, mask })
     }
 
-    /// Checks if an IP is contained in a given CIDR.
+    /// Checks if an [`Ip`] is contained in this subnet.
     #[inline]
     pub const fn contains(&self, ip: Ip) -> bool {
         let mask_bits = self.as_bitmask();
