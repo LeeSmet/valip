@@ -187,7 +187,7 @@ impl Ip {
         }
 
         // Ensure we have sufficient input
-        if section_count < 8 && !double_section_index.is_some() {
+        if section_count < 8 && double_section_index.is_none() {
             return Err(Error::MissingOctet);
         }
 
@@ -207,8 +207,12 @@ impl Ip {
                 octets[idx] = octets[idx - (omitted_sections - 1) * 2];
             }
             // Zero out omitted sections
-            for idx in (dsi * 2)..((dsi + omitted_sections) * 2) {
-                octets[idx] = 0;
+            for octet in octets
+                .iter_mut()
+                .take((dsi + omitted_sections) * 2)
+                .skip(dsi * 2)
+            {
+                *octet = 0;
             }
         }
 
